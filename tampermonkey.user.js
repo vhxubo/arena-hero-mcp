@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Arena Hero Cells Bridge (wss)
+// @name         arena-hero-mcp
 // @namespace    arena-hero-cells
-// @version      0.2.0
-// @description  连本地 wss MCP 桥, 收 refresh 指令时读 IndexedDB 记忆格回推, 供 AI 查询
+// @version      0.3.0
+// @description  连本地 ws MCP 桥, 收 refresh 指令时读 IndexedDB 记忆格回推, 供 AI 查询
 // @match        https://app.arenahero.io/*
 // @match        http://localhost/*
 // @match        http://127.0.0.1/*
@@ -14,10 +14,8 @@
   'use strict'
   // ponytail: namespace 写死, 改账号改这里. demo 用 'demo', 匿名 'anonymous', 登录态填用户名.
   const NAMESPACE = 'demo'
-  // USE_WSS=false 用 ws:// 不加密(默认; 需浏览器对 app.arenahero.io 放行"不安全内容"; Node 端默认即此模式);
-  // USE_WSS=true 用 wss 自签(需先访问 https://127.0.0.1:7790 走过自签告警; Node 端需 USE_WSS=1 启动且有 cert.pem/key.pem).
-  const USE_WSS = false
-  const WSS_URL = (USE_WSS ? 'wss' : 'ws') + '://127.0.0.1:7790'
+  // ws 无加密. 浏览器需对 app.arenahero.io 放行"不安全内容"才能从 https 页连本 ws://
+  const WS_URL = 'ws://127.0.0.1:7790'
   const RECONNECT_MS = 3000
 
   async function readCells() {
@@ -53,9 +51,9 @@
   }
 
   function connect() {
-    try { ws = new WebSocket(WSS_URL) }
+    try { ws = new WebSocket(WS_URL) }
     catch (e) { setBtn('📡 桥连失败', '#b91c1c'); scheduleReconnect(); return }
-    ws.onopen = () => { connected = true; setBtn('📡 已连 MCP 桥', '#16a34a'); console.log('[cells-bridge] connected', WSS_URL) }
+    ws.onopen = () => { connected = true; setBtn('📡 已连 MCP 桥', '#16a34a'); console.log('[cells-bridge] connected', WS_URL) }
     ws.onclose = () => { connected = false; setBtn('📡 桥已断开', '#b91c1c'); scheduleReconnect() }
     ws.onerror = () => {}
     ws.onmessage = (e) => {
@@ -75,5 +73,5 @@
   setBtn('📡 连接中...', '#6b7280')
 
   connect()
-  console.log(`[cells-bridge] 已加载 ns=${NAMESPACE}, wss=${WSS_URL}`)
+  console.log(`[cells-bridge] 已加载 ns=${NAMESPACE}, ws=${WS_URL}`)
 })()

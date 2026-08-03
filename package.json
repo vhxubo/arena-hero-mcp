@@ -16,9 +16,7 @@
   "files": ["server.mjs", "tampermonkey.user.js", "README.md", "tests/e2e.mjs"],
   "scripts": {
     "start": "node server.mjs",
-    "start:wss": "USE_WSS=1 node server.mjs",
-    "test": "node tests/e2e.mjs",
-    "test:wss": "USE_WSS=1 node tests/e2e.mjs"
+    "test": "node tests/e2e.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

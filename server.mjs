@@ -1,38 +1,23 @@
 #!/usr/bin/env node
-// arena-hero MCP 桥: 浏览器油猴 ws/wss 连入, AI 调 MCP 工具时 Node 通过该连接
+// arena-hero MCP 桥: 浏览器油猴 ws 连入, AI 调 MCP 工具时 Node 通过该连接
 // 发 {cmd:'refresh'}, 油猴读 IndexedDB 回推快照, Node 返给 AI.
 // MCP 层用官方 @modelcontextprotocol/sdk; WS 层手写(零额外依赖, RFC6455 子集).
 import net from 'node:net'
-import tls from 'node:tls'
 import crypto from 'node:crypto'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { z } from 'zod'
 
-const WSS_PORT = Number(process.env.PORT) || 7790
+const WS_PORT = Number(process.env.PORT) || 7790
 const REFRESH_TIMEOUT_MS = 5000
-// 默认 ws 无加密(给别人用零配置, 仅需浏览器放行不安全内容); USE_WSS=1 切自签 wss(需 cert.pem/key.pem)
-const USE_PLAIN_WS = process.env.USE_WSS !== '1'
-const here = dirname(fileURLToPath(import.meta.url))
 
 // --- 内存状态 ---
 let snapshot = { cells: [], updatedAt: 0, namespace: null }
 let wsClient = null
 let pendingResolve = null
 
-// --- WS server: wss(自签, USE_WSS=1) 或 ws(默认无加密). 两条路裸收 socket 自己做 WS 握手, 共用 handleWsUpgrade. ---
-if (USE_PLAIN_WS) {
-  net.createServer((s) => { s.setNoDelay(true); handleWsUpgrade(s) })
-    .listen(WSS_PORT, '127.0.0.1', () => stderr(`ws (insecure) listening 127.0.0.1:${WSS_PORT}`))
-} else {
-  const cert = readFileSync(process.env.CERT || join(here, 'cert.pem'))
-  const key = readFileSync(process.env.KEY || join(here, 'key.pem'))
-  tls.createServer({ cert, key }, (s) => { s.setNoDelay(true); handleWsUpgrade(s) })
-    .listen(WSS_PORT, '127.0.0.1', () => stderr(`wss listening 127.0.0.1:${WSS_PORT}`))
-}
+// --- WS server: ws (无加密). 浏览器需对游戏页放行"不安全内容"才能从 https 页连本 ws:// ---
+net.createServer((s) => { s.setNoDelay(true); handleWsUpgrade(s) })
+  .listen(WS_PORT, '127.0.0.1', () => stderr(`ws listening 127.0.0.1:${WS_PORT}`))
 
 // --- WebSocket 协议 (RFC 6455 最小子集) ---
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
@@ -182,7 +167,7 @@ server.registerTool('refresh', {
   return { content: [{ type: 'text', text: `已刷新: ${f.cells.length} cells\nkind 分布: ${JSON.stringify(tally(f.cells))}` }] }
 })
 
-// ponytail: stdio transport 由 MCP 客户端(Claude Code)驱动; 它接 stdin, server 即活着, wss 也同时听.
+// ponytail: stdio transport 由 MCP 客户端(Claude Code)驱动; 它接 stdin, server 即活着, ws 也同时听.
 const transport = new StdioServerTransport()
 await server.connect(transport)
 stderr('mcp server ready (stdio)')

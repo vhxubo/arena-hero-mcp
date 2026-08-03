@@ -55,7 +55,7 @@ npm install -g arena-hero-mcp
 { "mcpServers": { "arena-hero-cells": { "command": "arena-hero-mcp" } } }
 ```
 
-> 默认 **ws 无证书**(零配置,仅浏览器放行不安全内容)。要 wss 自签:`.mcp.json` 加 `"env": { "USE_WSS": "1" }`,并在包目录放 `cert.pem`/`key.pem`(或设 `CERT`/`KEY` 环境变量指向你的证书路径)。
+> 默认 **ws 无证书**(零配置,仅浏览器放行不安全内容)。
 
 ## 一次性配置(浏览器侧)
 
@@ -67,15 +67,12 @@ npm install -g arena-hero-mcp
 4. 改顶部:
    ```js
    const NAMESPACE = 'demo'      // ← 你的 arena-hero 用户名;匿名用 'anonymous'
-   const USE_WSS = false         // ← ws 无证书用 false(默认);wss 自签用 true
    ```
 5. 保存(Ctrl+S)
 
 ### 2. 浏览器放行不安全内容(ws 模式必做)
 
 浏览器禁止 https 页面连 `ws://`。打开 `https://app.arenahero.io` → 地址栏左侧锁/感叹号 → 站点设置 → "不安全内容" → 允许。
-
-> wss 模式:改为访问 `https://127.0.0.1:7790` 走过自签告警。
 
 ## 日常使用
 
@@ -119,7 +116,6 @@ npm install -g arena-hero-mcp
 | `list_resources` 返回"已连接但无非EMPTY数据" | `NAMESPACE` 不对。改油猴顶部为你的用户名,刷新游戏页 |
 | `list_resources` 返回"等待回包超时" | 油猴连上但没回包。开浏览器 Console 看 `[cells-bridge] 读取失败` |
 | `list_resources` 返回"浏览器未连接" | arena 页关了或油猴没连。重开页面 |
-| wss 模式连不上 | `cert.pem`/`key.pem` 不在或路径错;设 `USE_WSS=1` 时证书需就位 |
 
 ---
 
@@ -131,15 +127,13 @@ npm install -g arena-hero-mcp
 
 - Node.js ≥ 18
 - 已 `npm install`(装 `@modelcontextprotocol/sdk` + `zod`)
-- 想测 wss 还需 `cert.pem`/`key.pem`(见末尾"证书")
 
 ## 本地起 server
 
 ```bash
 cd ~/dev/arena-hero-mcp
-node server.mjs            # 默认 ws 无证书
-USE_WSS=1 node server.mjs  # wss 自签(需 cert.pem/key.pem)
-PORT=7788 node server.mjs  # 换端口
+node server.mjs            # ws 无证书
+PORT=7788 node server.mjs # 换端口
 ```
 
 直接 `node server.mjs` 起来后会**等 stdin**(stdio MCP server 依赖客户端喂 JSON-RPC),stdin EOF 即退出——这是正常的。要它持续运行,要么接 MCP 客户端,要么用下面的测试脚本喂它。
@@ -151,13 +145,12 @@ PORT=7788 node server.mjs  # 换端口
 `tests/e2e.mjs` 起本项目 server + 模拟浏览器 WS 客户端握手、收 refresh 回假快照、发 MCP 调用验全链路:
 
 ```bash
-node tests/e2e.mjs              # 默认 ws
-USE_WSS=1 node tests/e2e.mjs    # 测 wss
+node tests/e2e.mjs
 ```
 
 期望输出:
 ```
-✓ WS握手 OK (ws)
+✓ WS握手 OK
 ✓ 收到 refresh 指令: {"cmd":"refresh"}
 ✓ tools/list 工具数: 5
 ✓ list_resources 返回资源坐标
@@ -205,15 +198,6 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"l
 4. 发布后,用户的 `.mcp.json` 用 `npx -y arena-hero-mcp` 即自动拉取。
 5. 发新版:改 `version`(`npm version patch|minor|major`)→ `npm publish`。
 
-> **证书不入包**:`.npmignore` 排除 `*.pem`。wss 是可选项,用户按需自行生成证书(见末尾)。默认 ws 模式零证书。
-
-## 证书(wss 模式才需要)
-
-```bash
-openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"
-```
-放包根目录,或用 `CERT`/`KEY` 环境变量指路径。**不要把你生成的证书随包共享**——每人自签一份。
-
 ## 项目结构
 
 ```
@@ -222,19 +206,16 @@ arena-hero-mcp/
 ├── tampermonkey.user.js  # 浏览器油猴 WS 客户端
 ├── tests/e2e.mjs         # 端到端测试(模拟浏览器)
 ├── package.json          # bin + 依赖
-├── .npmignore            # 发布排除证书/依赖/lock/.mcp.json
-├── .mcp.json             # 本项目自用 MCP 注册(npx 版)
-├── cert.pem / key.pem    # wss 证书(不入包, .npmignore 排除)
+├── .npmignore            # 发布排除依赖/lock/.mcp.json
+├── .mcp.json             # 本项目自用 MCP 注册(node 直跑)
 └── README.md             # 本文档
 ```
 
-## 环境变量(开发者向)
+## 环境变量
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `USE_WSS` | 未设(ws) | `=1` 用 wss 自签;不设用 ws 无证书 |
-| `PORT` | `7790` | WS 监听端口(改了油猴 `WSS_URL` 也要同步改) |
-| `CERT` / `KEY` | 包内 `cert.pem`/`key.pem` | wss 模式证书路径 |
+| `PORT` | `7790` | WS 监听端口(改了油猴 `WS_URL` 也要同步改) |
 
 ## 注意与边界
 
@@ -242,4 +223,3 @@ arena-hero-mcp/
 - **RESOURCE 会过时**:记忆点可能已被采/补充/移位,不可当当前可采;当前可采以游戏 WS `state.objects` 为准。
 - **DB 名固定**:`arena-hero-exploration-<namespace>`,`cells` 对象库。
 - **关 arena 页 = 断连**:AI 调工具返回"浏览器未连接"。重开页面即恢复。
-- **证书勿共享**:wss 模式的 `cert.pem`/`key.pem` 是你的私钥,每人应自行生成(`openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost"`)。给别人用默认 ws 模式即可,无需证书。
