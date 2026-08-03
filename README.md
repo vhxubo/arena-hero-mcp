@@ -1,6 +1,16 @@
 # arena-hero MCP
 
+[![npm version](https://img.shields.io/npm/v/arena-hero-mcp.svg)](https://www.npmjs.com/package/arena-hero-mcp)
+[![npm](https://img.shields.io/npm/dt/arena-hero-mcp.svg)](https://www.npmjs.com/package/arena-hero-mcp)
+[![license](https://img.shields.io/npm/l/arena-hero-mcp.svg)](https://github.com/vhxubo/arena-hero-mcp/blob/main/LICENSE)
+
+> Author: **vhxubo** · [npm](https://www.npmjs.com/package/arena-hero-mcp) · [GitHub](https://github.com/vhxubo/arena-hero-mcp)
+
 让 AI(Claude Code 等 MCP 客户端)查询 arena-hero 游戏页浏览器 IndexedDB 里的探索记忆格(资源/障碍坐标)。MCP 层用官方 `@modelcontextprotocol/sdk`,WS 层手写(RFC6455 子集)。
+
+```bash
+npm install -g arena-hero-mcp   # 或 npx -y arena-hero-mcp install claude
+```
 
 ## 这是什么 / 为什么需要
 
@@ -11,19 +21,15 @@
 
 ## 架构
 
-```
-游戏页(Tampermonkey 脚本)  ──ws://127.0.0.1:7790──►  MCP server (arena-hero-mcp)
-  收 {cmd:'refresh'} → 读 IndexedDB cells → 回推 snapshot            内存存最新快照
-  自动重连, 晚于 server 启动也能连上                                      │ stdio MCP
-                                                                          ▼
-                                                                     AI Client
-                                              list_resources / list_obstacles / get_all_cells
-                                              snapshot_info / refresh
+```mermaid
+flowchart LR
+    B["游戏页<br/>(Tampermonkey 脚本)"] -- "ws://127.0.0.1:7790<br/>{cmd:refresh} → snapshot" --> S["MCP server<br/>(arena-hero-mcp)<br/>内存最新快照"]
+    S -- "stdio MCP<br/>list_resources / list_obstacles /<br/>get_all_cells / snapshot_info /<br/>refresh / get_userscript" --> A["AI Client<br/>(Claude / Cursor / ...)"]
+    B -. "自动重连<br/>晚于 server 也能连" .-> S
 ```
 
-**按需触发**:AI 调工具时 server 才通过 WS 让浏览器读一次 DB,不定时、不手动推送。
-
-**生命周期**:server 由 MCP 客户端(Claude Code)启动时拉起,**开启期间一直常驻**(不是每次调用才启),客户端退出才停。油猴是独立浏览器进程,晚于 server 启动,靠自动重连(每 3 秒)连上。AI 在油猴连上之前调工具会收到"浏览器未连接"提示,连上后下次调用即可。
+- **按需触发**:AI 调工具时 server 才通过 WS 让浏览器读一次 DB,不定时、不手动推送。
+- **生命周期**:server 由 MCP 客户端(Claude Code)启动时拉起,**开启期间一直常驻**(不是每次调用才启),客户端退出才停。油猴是独立浏览器进程,晚于 server 启动,靠自动重连(每 3 秒)连上。AI 在油猴连上之前调工具会收到"浏览器未连接"提示,连上后下次调用即可。
 
 ## 安装
 
@@ -46,10 +52,11 @@ npx -y arena-hero-mcp install <agent> --global # 全局, 写用户级配置(所�
 | `windsurf` | `./.codeium/windsurf/mcp_config.json` | `~/.codeium/windsurf/mcp_config.json` |
 | `cline` | `./.cline/mcp_settings.json` | `~/.cline/mcp_settings.json` |
 | `continue` | `./.continue/config.json` | `~/.continue/config.json` |
+| `codex` | *(不支持, 只读用户级)* | `~/.codex/config.toml`(TOML) |
 
 写入的配置是 `npx -y arena-hero-mcp`(首次调用 npx 自动拉取,无需 `npm install`)。重启对应 agent 生效。
 
-> `claude-desktop` 只支持 `--global`。项目级会提示加 `--global`。
+> `claude-desktop` / `codex` 只支持 `--global`。项目级会提示加 `--global`。codex 用 TOML 格式(`[mcp_servers.arena-hero-mcp]` 段)。
 
 ### 手动配置(不想用 install 命令)
 
@@ -58,7 +65,7 @@ npx -y arena-hero-mcp install <agent> --global # 全局, 写用户级配置(所�
 ```json
 {
   "mcpServers": {
-    "arena-hero-cells": {
+    "arena-hero-mcp": {
       "command": "npx",
       "args": ["-y", "arena-hero-mcp"]
     }
@@ -166,7 +173,8 @@ node tests/e2e.mjs
 ```
 ✓ WS握手 OK
 ✓ 收到 refresh 指令: {"cmd":"refresh"}
-✓ tools/list 工具数: 5
+✓ tools/list 工具数: 6
+✓ get_userscript 返回油猴脚本
 ✓ list_resources 返回资源坐标
 全部通过 ✓
 ```
@@ -192,7 +200,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"l
 
 最终形态验证。本地测建议 `.mcp.json` 临时用 node(npx 发布前才用):
 ```json
-{ "mcpServers": { "arena-hero-cells": { "command": "node", "args": ["server.mjs"] } } }
+{ "mcpServers": { "arena-hero-mcp": { "command": "node", "args": ["server.mjs"] } } }
 ```
 1. 在 `~/dev/arena-hero-mcp` 开 Claude Code → 加载 `.mcp.json` 拉起 server
 2. 浏览器装油猴脚本(改 `NAMESPACE`)、放行不安全内容、进 arena 页按钮变绿
@@ -206,8 +214,8 @@ printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"l
 
 ## 发布到 npm
 
-1. 检查 `package.json`:`name`/`version`/`description`/`license`/`author`/`repository`/`homepage`(影响 npm 页面)。当前 `version: 0.3.0`。
-2. `npm pack --dry-run` 看打包内容——应只有 `README.md`/`package.json`/`server.mjs`/`tampermonkey.user.js`(`.npmignore` 排除了 `*.pem`/`node_modules`/`package-lock.json`/`.mcp.json`)。
+1. 检查 `package.json`:`name`/`version`/`description`/`license`/`author`/`repository`/`homepage`(影响 npm 页面)。
+2. `npm pack --dry-run` 看打包内容——应只有 `README.md`/`package.json`/`server.mjs`/`tampermonkey.user.js`/`tests/e2e.mjs`(`.npmignore` 排除了 `node_modules`/`package-lock.json`/`.mcp.json`)。
 3. `npm login`(首次)→ `npm publish`。
 4. 发布后,用户的 `.mcp.json` 用 `npx -y arena-hero-mcp` 即自动拉取。
 5. 发新版:改 `version`(`npm version patch|minor|major`)→ `npm publish`。

@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         arena-hero-mcp
-// @namespace    arena-hero-cells
+// @namespace    arena-hero-mcp
 // @version      0.3.0
 // @description  连本地 ws MCP 桥, 收 refresh 指令时读 IndexedDB 记忆格回推, 供 AI 查询
 // @match        https://app.arenahero.io/*

@@ -17,8 +17,8 @@ const pkgRoot = existsSync(join(here, 'tampermonkey.user.js')) ? here : join(her
 // --- install 子命令: 写入各 agent 的 MCP 配置, 跑完即退, 不启动 MCP server ---
 // 用法: arena-hero-mcp install [agent] [--global]
 //   默认项目级(写当前目录配置); --global 写用户级配置.
-//   支持: claude | cursor | windsurf | cline | continue | claude-desktop
-//   注: claude-desktop 只有全局配置(桌面端不读项目级), --global 才有效.
+//   支持: claude | cursor | windsurf | cline | continue | claude-desktop | codex
+//   注: claude-desktop/codex 只有全局配置, --global 才有效.
 if (process.argv[2] === 'install') {
   const isGlobal = process.argv.includes('--global')
   const targetIdx = process.argv.findIndex((a, i) => i >= 3 && a !== '--global')
@@ -35,17 +35,30 @@ if (process.argv[2] === 'install') {
     'windsurf': { project: join(cwd, '.codeium', 'windsurf', 'mcp_config.json'), global: join(home, '.codeium', 'windsurf', 'mcp_config.json') },
     'cline': { project: join(cwd, '.cline', 'mcp_settings.json'), global: join(home, '.cline', 'mcp_settings.json') },
     'continue': { project: join(cwd, '.continue', 'config.json'), global: join(home, '.continue', 'config.json') },
+    'codex': { project: null, global: join(home, '.codex', 'config.toml') },
   }
   if (!paths[target]) { console.error(`未知 agent: ${target}\n支持: ${Object.keys(paths).join(', ')}`); process.exit(1) }
   const path = isGlobal ? paths[target].global : paths[target].project
-  if (!path) { console.error(`${target} 无项目级配置(桌面端不读项目级), 请加 --global: arena-hero-mcp install ${target} --global`); process.exit(1) }
+  if (!path) { console.error(`${target} 无项目级配置(只读用户级), 请加 --global: arena-hero-mcp install ${target} --global`); process.exit(1) }
+  // codex 用 TOML, 其余 JSON. ponytail: TOML 段写死, 不引 toml 库——单 server 配置几行足够.
+  if (target === 'codex') {
+    const section = `[mcp_servers.arena-hero-mcp]\ncommand = "${cmd}"\nargs = ${JSON.stringify(args)}\n`
+    let toml = existsSync(path) ? readFileSync(path, 'utf8') : ''
+    // 已存在同段则替换, 否则追加. 简化: 删旧段再加新段.
+    toml = toml.replace(/\n?\[mcp_servers\.arena-hero-mcp\][\s\S]*?(?=\n\[|\n*$)/, '').trimEnd()
+    toml = (toml ? toml + '\n\n' : '') + section
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, toml)
+    console.log(`✓ 已写入 codex 全局 MCP 配置:\n  ${path}\n  [mcp_servers.arena-hero-mcp]\n  command = "${cmd}"\n  args = ${JSON.stringify(args)}\n重启 codex 生效。`)
+    process.exit(0)
+  }
   let cfg = {}
   if (existsSync(path)) { try { cfg = JSON.parse(readFileSync(path, 'utf8')) } catch { cfg = {} } }
   cfg.mcpServers = cfg.mcpServers || {}
-  cfg.mcpServers['arena-hero-cells'] = { command: cmd, args }
+  cfg.mcpServers['arena-hero-mcp'] = { command: cmd, args }
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, JSON.stringify(cfg, null, 2))
-  console.log(`✓ 已写入 ${target} ${isGlobal ? '全局' : '项目级'} MCP 配置:\n  ${path}\n  arena-hero-cells: ${cmd} ${args.join(' ')}\n重启 ${target} 生效。`)
+  console.log(`✓ 已写入 ${target} ${isGlobal ? '全局' : '项目级'} MCP 配置:\n  ${path}\n  arena-hero-mcp: ${cmd} ${args.join(' ')}\n重启 ${target} 生效。`)
   process.exit(0)
 }
 
@@ -149,7 +162,7 @@ async function fetchFresh() {
 
 // --- MCP server (官方 SDK) ---
 const STALE_NOTE = '⚠️ RESOURCE 为探索记忆, 会过时(可能已被采集/补充/移位), 不可当"当前可采"; 当前可采以 WS state.objects 为准.'
-const server = new McpServer({ name: 'arena-hero-cells', version: '0.3.0' })
+const server = new McpServer({ name: 'arena-hero-mcp', version: '0.3.1' })
 
 function tally(cells) { const m = {}; for (const c of cells) m[c.kind] = (m[c.kind] ?? 0) + 1; return m }
 function wrap(cells, note) { return { content: [{ type: 'text', text: note ? `${note}\n\n${JSON.stringify(cells, null, 2)}` : JSON.stringify(cells, null, 2) }] } }
