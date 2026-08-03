@@ -13,6 +13,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 const here = dirname(fileURLToPath(import.meta.url))
 // 本地开发时 server.mjs 在包根; npx/全局装时在 node_modules/<pkg>/dist? 不——仍是 server.mjs 同级. 油猴脚本在其旁.
 const pkgRoot = existsSync(join(here, 'tampermonkey.user.js')) ? here : join(here, '..')
+// 版本校验: 油猴脚本回包带的 v 必须与 npm 包 version 一致, 否则提示升级脚本.
+const PKG_VERSION = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).version
 
 // --- install 子命令: 写入各 agent 的 MCP 配置, 跑完即退, 不启动 MCP server ---
 // 用法: arena-hero-mcp install [agent] [--global]
@@ -145,8 +147,8 @@ function handleMessage(text) {
   let msg
   try { msg = JSON.parse(text) } catch { return }
   if (msg.type === 'snapshot') {
-    snapshot = { cells: Array.isArray(msg.cells) ? msg.cells : [], updatedAt: Date.now(), namespace: msg.namespace ?? null }
-    stderr(`snapshot ${snapshot.cells.length} cells (ns=${snapshot.namespace})`)
+    snapshot = { cells: Array.isArray(msg.cells) ? msg.cells : [], updatedAt: Date.now(), namespace: msg.namespace ?? null, scriptV: msg.v ?? null }
+    stderr(`snapshot ${snapshot.cells.length} cells (ns=${snapshot.namespace}, v=${snapshot.scriptV})`)
     if (pendingResolve) { pendingResolve(snapshot); pendingResolve = null }
   }
 }
@@ -162,7 +164,7 @@ async function fetchFresh() {
 
 // --- MCP server (官方 SDK) ---
 const STALE_NOTE = '⚠️ RESOURCE 为探索记忆, 会过时(可能已被采集/补充/移位), 不可当"当前可采"; 当前可采以 WS state.objects 为准.'
-const server = new McpServer({ name: 'arena-hero-mcp', version: '0.3.1' })
+const server = new McpServer({ name: 'arena-hero-mcp', version: '0.3.3' })
 
 function tally(cells) { const m = {}; for (const c of cells) m[c.kind] = (m[c.kind] ?? 0) + 1; return m }
 function wrap(cells, note) { return { content: [{ type: 'text', text: note ? `${note}\n\n${JSON.stringify(cells, null, 2)}` : JSON.stringify(cells, null, 2) }] } }
@@ -171,6 +173,10 @@ async function freshCells() {
   let snap
   try { snap = await fetchFresh() }
   catch (e) { return { error: e.message }
+  }
+  // 版本校验: 油猴脚本 v 与包版本不一致 → 强制提示升级, 不返回旧数据.
+  if (snap.scriptV && snap.scriptV !== PKG_VERSION) {
+    return { error: `油猴脚本版本(${snap.scriptV})与 MCP server(${PKG_VERSION})不匹配. 请在 Tampermonkey 重新安装/更新油猴脚本(从 get_userscript 工具或仓库 tampermonkey.user.js 取最新), 使其与 npm 包版本一致。` }
   }
   const cells = snap.cells
   if (!cells.length) return { error: '浏览器已连接但 IndexedDB 无非EMPTY数据. 确认 NAMESPACE 与已探索过地图.' }
@@ -209,7 +215,7 @@ server.registerTool('snapshot_info', {
   inputSchema: {},
 }, async () => {
   const connected = !!(wsClient && !wsClient.destroyed)
-  const info = { count: snapshot.cells.length, namespace: snapshot.namespace, updatedAt: snapshot.updatedAt ? new Date(snapshot.updatedAt).toISOString() : null, kinds: tally(snapshot.cells), browserConnected: connected }
+  const info = { serverVersion: PKG_VERSION, scriptVersion: snapshot.scriptV ?? null, versionMatch: snapshot.scriptV ? (snapshot.scriptV === PKG_VERSION) : null, count: snapshot.cells.length, namespace: snapshot.namespace, updatedAt: snapshot.updatedAt ? new Date(snapshot.updatedAt).toISOString() : null, kinds: tally(snapshot.cells), browserConnected: connected }
   return { content: [{ type: 'text', text: JSON.stringify(info, null, 2) }] }
 })
 

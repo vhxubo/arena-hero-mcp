@@ -40,7 +40,7 @@ function wsConnect() {
     if (mask) { mk = buf.slice(2, 6); p = 6 }
     const pl = buf.slice(p, p + len); const txt = mask ? Buffer.from(pl.map((b, i) => b ^ mk[i % 4])) : pl
     console.log('✓ 收到 refresh 指令:', txt.toString())
-    const data = Buffer.from(JSON.stringify({ type: 'snapshot', namespace: 'test', cells: [
+    const data = Buffer.from(JSON.stringify({ type: 'snapshot', v: '0.3.3', namespace: 'test', cells: [
       { kind: 'RESOURCE', position: [1, 2] }, { kind: 'OBSTACLE', position: [3, 4] },
     ] }))
     const m = Buffer.from([0, 0, 0, 0])

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         arena-hero-mcp
 // @namespace    arena-hero-mcp
-// @version      0.3.0
+// @version      0.3.3
 // @description  连本地 ws MCP 桥, 收 refresh 指令时读 IndexedDB 记忆格回推, 供 AI 查询
 // @match        https://app.arenahero.io/*
 // @match        http://localhost/*
@@ -12,7 +12,9 @@
 
 (function () {
   'use strict'
-  // ponytail: namespace 写死, 改账号改这里. demo 用 'demo', 匿名 'anonymous', 登录态填用户名.
+  // ponytail: 脚本版本, 必须与 npm 包(arena-hero-mcp)version 一致, 否则 server 报版本不匹配.
+  const SCRIPT_VERSION = '0.3.3'
+  // namespace 写死, 改账号改这里. demo 用 'demo', 匿名 'anonymous', 登录态填用户名.
   const NAMESPACE = 'demo'
   // ws 无加密. 浏览器需对 app.arenahero.io 放行"不安全内容"才能从 https 页连本 ws://
   const WS_URL = 'ws://127.0.0.1:7790'
@@ -41,11 +43,11 @@
   async function handleRefresh() {
     try {
       const cells = await readCells()
-      const msg = JSON.stringify({ type: 'snapshot', namespace: NAMESPACE, cells })
+      const msg = JSON.stringify({ type: 'snapshot', v: SCRIPT_VERSION, namespace: NAMESPACE, cells })
       ws && ws.send(msg)
       console.log('[cells-bridge] refresh ->', cells.length, 'cells')
     } catch (e) {
-      ws && ws.send(JSON.stringify({ type: 'snapshot', namespace: NAMESPACE, cells: [], error: String(e) }))
+      ws && ws.send(JSON.stringify({ type: 'snapshot', v: SCRIPT_VERSION, namespace: NAMESPACE, cells: [], error: String(e) }))
       console.warn('[cells-bridge] 读取失败', e)
     }
   }
@@ -69,8 +71,9 @@
     GM_registerMenuCommand('Arena: 重连 MCP 桥', connect)
   }
   btn.onclick = () => (connected ? handleRefresh() : connect())
-  ;(document.body || document.documentElement).appendChild(btn)
-  setBtn('📡 连接中...', '#6b7280')
+  // ponytail: 只在正式 arena 页显示状态按钮; 其它页(登录/本地开发)静默连接, 不占 UI.
+  const showBtn = location.hostname === 'app.arenahero.io' && location.pathname.startsWith('/arena')
+  if (showBtn) { ;(document.body || document.documentElement).appendChild(btn); setBtn('📡 连接中...', '#6b7280') }
 
   connect()
   console.log(`[cells-bridge] 已加载 ns=${NAMESPACE}, ws=${WS_URL}`)

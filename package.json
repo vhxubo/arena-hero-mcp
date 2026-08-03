@@ -1,6 +1,6 @@
 {
   "name": "arena-hero-mcp",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "type": "module",
   "description": "MCP bridge: query arena-hero browser IndexedDB exploration cells via WebSocket",
   "license": "MIT",
