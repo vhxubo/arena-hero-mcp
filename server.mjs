@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { z } from 'zod'
 
 const here = dirname(fileURLToPath(import.meta.url))
 // 本地开发时 server.mjs 在包根; npx/全局装时在 node_modules/<pkg>/dist? 不——仍是 server.mjs 同级. 油猴脚本在其旁.
@@ -71,6 +72,8 @@ const REFRESH_TIMEOUT_MS = 5000
 let snapshot = { cells: [], updatedAt: 0, namespace: null }
 let wsClient = null
 let pendingResolve = null
+let refreshQueue = Promise.resolve()
+const pendingTools = new Map()
 
 // --- WS server: ws (无加密). 浏览器需对游戏页放行"不安全内容"才能从 https 页连本 ws:// ---
 net.createServer((s) => { s.setNoDelay(true); handleWsUpgrade(s) })
@@ -151,20 +154,38 @@ function handleMessage(text) {
     stderr(`snapshot ${snapshot.cells.length} cells (ns=${snapshot.namespace}, v=${snapshot.scriptV})`)
     if (pendingResolve) { pendingResolve(snapshot); pendingResolve = null }
   }
+  if (msg.type === 'tool_response' && pendingTools.has(msg.requestId)) {
+    const resolve = pendingTools.get(msg.requestId); pendingTools.delete(msg.requestId); resolve(msg)
+  }
+}
+
+async function browserTool(tool, args = {}) {
+  if (!wsClient || wsClient.destroyed) throw new Error('浏览器未连接: 请打开 arena 页面')
+  const requestId = crypto.randomUUID()
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { pendingTools.delete(requestId); reject(new Error('等待浏览器工具回包超时')) }, REFRESH_TIMEOUT_MS)
+    pendingTools.set(requestId, (message) => { clearTimeout(timer); message.error ? reject(new Error(message.error)) : resolve(message.result) })
+    sendJson(wsClient, { cmd: 'tool', requestId, tool, args })
+  })
 }
 
 async function fetchFresh() {
-  if (!wsClient || wsClient.destroyed) throw new Error('浏览器未连接: 请在游戏页跑油猴脚本建立 ws 连接')
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pendingResolve = null; reject(new Error('等待浏览器回包超时, 确认游戏页油猴脚本在跑')) }, REFRESH_TIMEOUT_MS)
-    pendingResolve = (snap) => { clearTimeout(timer); resolve(snap) }
-    sendJson(wsClient, { cmd: 'refresh' })
-  })
+  const refresh = () => {
+    if (!wsClient || wsClient.destroyed) throw new Error('浏览器未连接: 请在游戏页跑油猴脚本建立 ws 连接')
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { pendingResolve = null; reject(new Error('等待浏览器回包超时, 确认游戏页油猴脚本在跑')) }, REFRESH_TIMEOUT_MS)
+      pendingResolve = (snap) => { clearTimeout(timer); resolve(snap) }
+      sendJson(wsClient, { cmd: 'refresh' })
+    })
+  }
+  const result = refreshQueue.then(refresh, refresh)
+  refreshQueue = result.catch(() => {})
+  return result
 }
 
 // --- MCP server (官方 SDK) ---
 const STALE_NOTE = '⚠️ RESOURCE 为探索记忆, 会过时(可能已被采集/补充/移位), 不可当"当前可采"; 当前可采以 WS state.objects 为准.'
-const server = new McpServer({ name: 'arena-hero-mcp', version: '0.3.3' })
+const server = new McpServer({ name: 'arena-hero-mcp', version: PKG_VERSION })
 
 function tally(cells) { const m = {}; for (const c of cells) m[c.kind] = (m[c.kind] ?? 0) + 1; return m }
 function wrap(cells, note) { return { content: [{ type: 'text', text: note ? `${note}\n\n${JSON.stringify(cells, null, 2)}` : JSON.stringify(cells, null, 2) }] } }
@@ -179,9 +200,46 @@ async function freshCells() {
     return { error: `油猴脚本版本(${snap.scriptV})与 MCP server(${PKG_VERSION})不匹配. 请在 Tampermonkey 重新安装/更新油猴脚本(从 get_userscript 工具或仓库 tampermonkey.user.js 取最新), 使其与 npm 包版本一致。` }
   }
   const cells = snap.cells
-  if (!cells.length) return { error: '浏览器已连接但 IndexedDB 无非EMPTY数据. 确认 NAMESPACE 与已探索过地图.' }
+  if (!cells.length) return { error: '浏览器已连接但 IndexedDB 无探索数据. 请先进入 arena 探索地图.' }
   return { cells }
 }
+
+server.registerTool('get_exploration_map', {
+  description: '返回已探索地图格, 包含 EMPTY(已知可通行)、OBSTACLE 和可能过时的 RESOURCE. 可按 kind 和坐标闭区间筛选.',
+  inputSchema: {
+    kind: z.enum(['EMPTY', 'OBSTACLE', 'RESOURCE']).optional(),
+    minX: z.number().int().optional(), maxX: z.number().int().optional(),
+    minY: z.number().int().optional(), maxY: z.number().int().optional(),
+  },
+}, async ({ kind, minX, maxX, minY, maxY }) => {
+  if ((minX !== undefined && maxX !== undefined && minX > maxX) || (minY !== undefined && maxY !== undefined && minY > maxY)) {
+    return { content: [{ type: 'text', text: '❌ 坐标范围无效: min 不能大于 max' }], isError: true }
+  }
+  const f = await freshCells()
+  if (f.error) return { content: [{ type: 'text', text: `❌ ${f.error}` }] }
+  const cells = f.cells.filter((cell) => {
+    const [x, y] = cell.position ?? []
+    return (!kind || cell.kind === kind)
+      && (minX === undefined || x >= minX) && (maxX === undefined || x <= maxX)
+      && (minY === undefined || y >= minY) && (maxY === undefined || y <= maxY)
+  })
+  return wrap(cells, cells.some((cell) => cell.kind === 'RESOURCE') ? STALE_NOTE : undefined)
+})
+
+for (const [name, description] of [
+  ['get_movement_goals', '返回 Web localStorage 中跨 Tick 移动目标.'],
+  ['get_command_context', '返回当前 Tick 的 Agent、Manual 与合并后有效指令.'],
+  ['get_web_game_context', '返回浏览器旁听到的 Tick、连接阶段、指令窗口剩余时间和移动目标.'],
+]) server.registerTool(name, { description, inputSchema: {} }, async () => {
+  try { return wrap(await browserTool(name)) } catch (error) { return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true } }
+})
+
+server.registerTool('preview_route', {
+  description: '使用浏览器当前游戏状态和探索记忆预览对象到目标格的路线.',
+  inputSchema: { objectId: z.string().min(1), destination: z.tuple([z.number().int(), z.number().int()]) },
+}, async (args) => {
+  try { return wrap(await browserTool('preview_route', args)) } catch (error) { return { content: [{ type: 'text', text: `❌ ${error.message}` }], isError: true } }
+})
 
 server.registerTool('list_resources', {
   description: '列出 IndexedDB cells 中所有 kind=RESOURCE 的探索记忆格(你本局探索过的资源节点坐标). 每次调用通过 ws 让浏览器重读 IndexedDB 返回最新. ⚠️ 记忆会过时, 不可当当前可采.',
@@ -229,13 +287,13 @@ server.registerTool('refresh', {
 })
 
 server.registerTool('get_userscript', {
-  description: '返回 Tampermonkey 油猴脚本全文, 供用户粘贴进扩展安装. 顶部 NAMESPACE 需用户改成自己的 arena-hero 用户名. 不依赖浏览器连接, 随时可调.',
+  description: '返回 Tampermonkey 油猴脚本全文, 供用户粘贴进扩展安装. 脚本会自动识别当前 arena-hero 用户. 不依赖浏览器连接, 随时可调.',
   inputSchema: {},
 }, async () => {
   const file = join(pkgRoot, 'tampermonkey.user.js')
   try {
     const code = readFileSync(file, 'utf8')
-    const note = '将以下全文粘进 Tampermonkey 新建脚本, 改顶部 NAMESPACE 为你的用户名, 保存即可. 原始文件见仓库 tampermonkey.user.js.\n\n'
+    const note = '将以下全文粘进 Tampermonkey 新建脚本并保存即可; 脚本会自动识别当前用户. 原始文件见仓库 tampermonkey.user.js.\n\n'
     return { content: [{ type: 'text', text: note + code }] }
   } catch (e) {
     return { content: [{ type: 'text', text: `❌ 读取油猴脚本失败: ${e.message}\n请从 https://github.com/vhxubo/arena-hero-mcp 获取 tampermonkey.user.js` }] }

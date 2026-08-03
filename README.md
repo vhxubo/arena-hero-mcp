@@ -1,66 +1,20 @@
 # arena-hero MCP
 
 [![npm version](https://img.shields.io/npm/v/arena-hero-mcp.svg)](https://www.npmjs.com/package/arena-hero-mcp)
-[![npm](https://img.shields.io/npm/dt/arena-hero-mcp.svg)](https://www.npmjs.com/package/arena-hero-mcp)
 [![license](https://img.shields.io/npm/l/arena-hero-mcp.svg)](https://github.com/vhxubo/arena-hero-mcp/blob/main/LICENSE)
 
-> Author: **vhxubo** · [npm](https://www.npmjs.com/package/arena-hero-mcp) · [GitHub](https://github.com/vhxubo/arena-hero-mcp)
-
-让 AI(Claude Code 等 MCP 客户端)查询 arena-hero 游戏页浏览器 IndexedDB 里的探索记忆格(资源/障碍坐标)。MCP 层用官方 `@modelcontextprotocol/sdk`,WS 层手写(RFC6455 子集)。
-
-```bash
-npm install -g arena-hero-mcp   # 或 npx -y arena-hero-mcp install claude
-```
-
-## 这是什么 / 为什么需要
-
-游戏页把"你这局探索过的格子"记在浏览器 IndexedDB(`arena-hero-exploration-<用户名>` 数据库,`cells` 对象库)。AI 想知道"地图上有哪些资源"时,这份数据**只在浏览器里**,Node 拿不到。本桥用一条 WebSocket 把浏览器和本地 MCP server 连起来,AI 每次调工具时,server 让浏览器读一次 DB、把结果回传给 AI。
-
-- **数据范围**:你这局探索过的格子。没去过的区域没有,任何方案都拿不到。
-- **RESOURCE 是过时记忆**:节点可能已被采集/补充/移位,不可当"当前可采";当前可采以游戏 WS 的 `state.objects` 为准。OBSTACLE 是永久地形,记忆可信。
-
-## 架构
-
-```mermaid
-flowchart LR
-    B["游戏页<br/>(Tampermonkey 脚本)"] -- "ws://127.0.0.1:7790<br/>{cmd:refresh} → snapshot" --> S["MCP server<br/>(arena-hero-mcp)<br/>内存最新快照"]
-    S -- "stdio MCP<br/>list_resources / list_obstacles /<br/>get_all_cells / snapshot_info /<br/>refresh / get_userscript" --> A["AI Client<br/>(Claude / Cursor / ...)"]
-    B -. "自动重连<br/>晚于 server 也能连" .-> S
-```
-
-- **按需触发**:AI 调工具时 server 才通过 WS 让浏览器读一次 DB,不定时、不手动推送。
-- **生命周期**:server 由 MCP 客户端(Claude Code)启动时拉起,**开启期间一直常驻**(不是每次调用才启),客户端退出才停。油猴是独立浏览器进程,晚于 server 启动,靠自动重连(每 3 秒)连上。AI 在油猴连上之前调工具会收到"浏览器未连接"提示,连上后下次调用即可。
+让 AI 读取 Arena Hero 浏览器中的探索地图、移动目标、指令上下文，并预览路线。无需修改 Web 代码；浏览器数据由 Tampermonkey 脚本转发给本地 MCP server。
 
 ## 安装
 
-### 一行装到你的 AI agent(推荐)
-
 ```bash
-npx -y arena-hero-mcp install <agent>          # 项目级(默认), 写当前目录配置
-npx -y arena-hero-mcp install <agent> --global # 全局, 写用户级配置(所有项目可用)
+npx -y arena-hero-mcp install <agent>          # 当前项目
+npx -y arena-hero-mcp install <agent> --global # 全局
 ```
 
-**默认项目级**:只对当前目录的项目生效。加 `--global` 装到用户级,所有项目都能用。
+支持 `claude`、`claude-desktop`、`cursor`、`windsurf`、`cline`、`continue` 和 `codex`。`claude-desktop`、`codex` 仅支持 `--global`。安装后重启 agent。
 
-支持的 `<agent>` 及两级配置路径:
-
-| agent | 项目级(默认) | 全级(`--global`) |
-|---|---|---|
-| `claude` | `./.mcp.json` | `~/.claude.json` |
-| `claude-desktop` | *(不支持, 桌面端不读项目级)* | `~/.config/Claude/claude_desktop_config.json` |
-| `cursor` | `./.cursor/mcp.json` | `~/.cursor/mcp.json` |
-| `windsurf` | `./.codeium/windsurf/mcp_config.json` | `~/.codeium/windsurf/mcp_config.json` |
-| `cline` | `./.cline/mcp_settings.json` | `~/.cline/mcp_settings.json` |
-| `continue` | `./.continue/config.json` | `~/.continue/config.json` |
-| `codex` | *(不支持, 只读用户级)* | `~/.codex/config.toml`(TOML) |
-
-写入的配置是 `npx -y arena-hero-mcp`(首次调用 npx 自动拉取,无需 `npm install`)。重启对应 agent 生效。
-
-> `claude-desktop` / `codex` 只支持 `--global`。项目级会提示加 `--global`。codex 用 TOML 格式(`[mcp_servers.arena-hero-mcp]` 段)。
-
-### 手动配置(不想用 install 命令)
-
-把以下 `.mcp.json` 放进你的项目根或用户级 MCP 配置:
+手动配置：
 
 ```json
 {
@@ -73,175 +27,63 @@ npx -y arena-hero-mcp install <agent> --global # 全局, 写用户级配置(所�
 }
 ```
 
-> 默认 **ws 无证书**(零配置,仅浏览器放行不安全内容)。
+## 浏览器配置
 
-## 一次性配置(浏览器侧)
+1. 安装 Tampermonkey 或 Violentmonkey。
+2. 调用 MCP 工具 `get_userscript`，将返回的脚本全文粘贴为新用户脚本并保存。
+3. 在 `https://app.arenahero.io` 的站点设置中允许“不安全内容”，使 HTTPS 页面可以连接本机 `ws://127.0.0.1:7790`。
+4. 登录并打开 `https://app.arenahero.io/arena`。右上角显示 `📡 已连 MCP 桥` 即可使用。
 
-### 1. 装 Tampermonkey 脚本
+脚本自动识别当前用户名，无需修改配置。
 
-> 装好后,在 agent 里直接让 AI 调 `get_userscript` 工具即可拿到油猴脚本全文,粘贴进扩展安装,无需手动找文件。下面是手动获取方式:
+## 工具
 
-1. 装 Tampermonkey(或 Violentmonkey)扩展
-2. 仪表盘 → 新建脚本
-3. 把 [`tampermonkey.user.js`](./tampermonkey.user.js) 全文粘进去
-4. 改顶部:
-   ```js
-   const NAMESPACE = 'demo'      // ← 你的 arena-hero 用户名;匿名用 'anonymous'
-   ```
-5. 保存(Ctrl+S)
+| 工具 | 用途 |
+|---|---|
+| `get_exploration_map` | 查询已探索的 `EMPTY`、`RESOURCE`、`OBSTACLE`，支持 kind 和坐标范围筛选 |
+| `get_movement_goals` | 查询 Web 保存的跨 Tick 移动目标 |
+| `get_command_context` | 查询当前 Agent、Manual 和合并后的有效指令 |
+| `get_web_game_context` | 查询 Tick、连接阶段、指令窗口剩余时间和移动目标 |
+| `preview_route` | 按 Web 规则预览对象到目标坐标的路线 |
+| `list_resources` | 查询探索记忆中的资源坐标 |
+| `list_obstacles` | 查询已知永久障碍坐标 |
+| `get_all_cells` | 查询所有非空探索记忆格 |
+| `snapshot_info` | 查询版本、namespace、格子统计和浏览器连接状态 |
+| `refresh` | 强制浏览器重读 IndexedDB |
+| `get_userscript` | 获取当前版本的用户脚本 |
 
-### 2. 浏览器放行不安全内容(ws 模式必做)
+首次安装可调用 `snapshot_info` 验证：
 
-浏览器禁止 https 页面连 `ws://`。打开 `https://app.arenahero.io` → 地址栏左侧锁/感叹号 → 站点设置 → "不安全内容" → 允许。
+```json
+{
+  "browserConnected": true,
+  "versionMatch": true
+}
+```
 
-## 日常使用
+## 边界
 
-每次想让 AI 查资源:
-
-1. 开浏览器,登录 arena-hero,进 `https://app.arenahero.io/arena`(让 IndexedDB 有数据)
-2. 右上角按钮变绿 `📡 已连 MCP 桥` → 连上
-3. 在 Claude Code 里让 AI 查,比如:
-   - "用 list_resources 列出我探索过的资源点"
-   - "snapshot_info 看连上没、有多少格"
-
-> 不用手动点油猴按钮触发推送——AI 调工具本身就是触发。按钮只看状态/重连用。
-
-## MCP 工具
-
-| 工具 | 入参 | 返回 |
-|---|---|---|
-| `list_resources` | 无 | 所有 `kind=RESOURCE` 格(`{x,y}`),前缀带 stale 提示 |
-| `list_obstacles` | 无 | 所有 `kind=OBSTACLE` 格(永久地形,可信) |
-| `get_all_cells` | 无 | 所有非 EMPTY 格(RESOURCE+OBSTACLE) |
-| `snapshot_info` | 无 | `count` / `namespace` / `updatedAt` / `kinds` 分布 / `browserConnected` |
-| `refresh` | 无 | 强制让浏览器重读一次 DB;返回数量与 kind 分布 |
-| `get_userscript` | 无 | 返回 Tampermonkey 油猴脚本全文(不依赖浏览器连接,随时可调) |
-
-> `list_*`/`get_all_cells` 每次自动 refresh,返回即调用那一刻最新。`refresh` 仅怀疑过旧时单独调。`get_userscript` 让 AI 直接把脚本贴给你装,无需手动找文件。
-
-## 验证(装完第一次)
-
-1. Claude Code 开着 → server 常驻(stderr 不直接可见,但 `snapshot_info` 能查状态)
-2. 浏览器进 arena 页,按钮变绿 → WS 连上
-3. AI 调 `snapshot_info`:`browserConnected: true` 且 `count > 0` → 通
-4. AI 调 `list_resources` 拿到坐标 → 全就绪
+- 未探索区域没有数据。
+- `RESOURCE` 是探索记忆，可能已被采集、补充或移位；实时资源以游戏状态为准。
+- `preview_route` 在油猴脚本中复刻 Web 的视野、地形、占位和移动规则。
+- `selected_object_id` 无稳定浏览器资源来源，因此固定返回 `null`。
+- 关闭 Arena 页面后浏览器桥会断开。
 
 ## 排错
 
-| 现象 | 原因 / 处理 |
-|---|---|
-| 油猴保存报"用户脚本无效" | 元数据解析失败。`@match` 不带端口通配;`@include` 才支持端口。检查脚本头 |
-| 按钮 `📡 连接中...` 不变绿 | server 没起(MCP 客户端没拉起)或浏览器没放行不安全内容 |
-| 按钮 `📡 桥已断开` | WS 断了。点按钮手动重连;仍断看浏览器 Console `[cells-bridge]` 报错 |
-| `snapshot_info` 返回 `browserConnected: false` | 油猴没连。回浏览器看按钮颜色 |
-| `list_resources` 返回"已连接但无非EMPTY数据" | `NAMESPACE` 不对。改油猴顶部为你的用户名,刷新游戏页 |
-| `list_resources` 返回"等待回包超时" | 油猴连上但没回包。开浏览器 Console 看 `[cells-bridge] 读取失败` |
-| `list_resources` 返回"浏览器未连接" | arena 页关了或油猴没连。重开页面 |
+- `browserConnected: false`：确认 MCP server 已启动、Arena 页面已打开，并允许了不安全内容。
+- “无探索数据”：先进入 Arena 探索地图。
+- 脚本版本不匹配：重新调用 `get_userscript` 并覆盖旧用户脚本。
+- `EADDRINUSE`：端口 7790 已被另一实例占用。
+- Codex 日志出现 `listen EPERM`：当前沙箱禁止监听本机端口，需要在允许本地监听的环境中运行 MCP server。
 
----
+## 开发
 
-# 开发者文档
-
-以下面向维护者:本地起、测试、改代码、发布到 npm。
-
-## 前置
-
-- Node.js ≥ 18
-- 已 `npm install`(装 `@modelcontextprotocol/sdk` + `zod`)
-
-## 本地起 server
+需要 Node.js 18+。
 
 ```bash
-cd ~/dev/arena-hero-mcp
-node server.mjs            # ws 无证书
-PORT=7788 node server.mjs # 换端口
+npm install
+PORT=17790 npm test
 ```
 
-直接 `node server.mjs` 起来后会**等 stdin**(stdio MCP server 依赖客户端喂 JSON-RPC),stdin EOF 即退出——这是正常的。要它持续运行,要么接 MCP 客户端,要么用下面的测试脚本喂它。
-
-## 测试
-
-### 1. 端到端测试(推荐,日常跑这个)
-
-`tests/e2e.mjs` 起本项目 server + 模拟浏览器 WS 客户端握手、收 refresh 回假快照、发 MCP 调用验全链路:
-
-```bash
-node tests/e2e.mjs
-```
-
-期望输出:
-```
-✓ WS握手 OK
-✓ 收到 refresh 指令: {"cmd":"refresh"}
-✓ tools/list 工具数: 6
-✓ get_userscript 返回油猴脚本
-✓ list_resources 返回资源坐标
-全部通过 ✓
-```
-任何 `✗` 即失败,脚本 `process.exit(1)`。
-
-### 2. stdio MCP 手测(只验协议层,无浏览器)
-
-```bash
-printf '%s\n%s\n%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' \
-  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-| node server.mjs 2>/dev/null
-```
-
-应输出两行 JSON:`serverInfo` + 5 个工具。调 `list_resources` 应返回"浏览器未连接"(无浏览器时正确行为):
-```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_resources","arguments":{}}}' \
-| node server.mjs 2>/dev/null
-```
-
-### 3. 真实环境测(Claude Code + 真浏览器)
-
-最终形态验证。本地测建议 `.mcp.json` 临时用 node(npx 发布前才用):
-```json
-{ "mcpServers": { "arena-hero-mcp": { "command": "node", "args": ["server.mjs"] } } }
-```
-1. 在 `~/dev/arena-hero-mcp` 开 Claude Code → 加载 `.mcp.json` 拉起 server
-2. 浏览器装油猴脚本(改 `NAMESPACE`)、放行不安全内容、进 arena 页按钮变绿
-3. Claude Code 里让 AI 调 `snapshot_info` → `browserConnected:true` + `count>0` 即通
-
-## 改代码
-
-- `server.mjs`:MCP 工具在 `registerTool(...)` 调用段,加/改工具直接照现有 5 个的写法。WS 协议层(RFC6455 子集)在 `handleWsUpgrade`/`parseFrames`/`sendFrame`,一般不用动。
-- `tampermonkey.user.js`:浏览器侧。改了要让用户重装(油猴更新机制)。
-- 改完跑 `node tests/e2e.mjs` 回归。
-
-## 发布到 npm
-
-1. 检查 `package.json`:`name`/`version`/`description`/`license`/`author`/`repository`/`homepage`(影响 npm 页面)。
-2. `npm pack --dry-run` 看打包内容——应只有 `README.md`/`package.json`/`server.mjs`/`tampermonkey.user.js`/`tests/e2e.mjs`(`.npmignore` 排除了 `node_modules`/`package-lock.json`/`.mcp.json`)。
-3. `npm login`(首次)→ `npm publish`。
-4. 发布后,用户的 `.mcp.json` 用 `npx -y arena-hero-mcp` 即自动拉取。
-5. 发新版:改 `version`(`npm version patch|minor|major`)→ `npm publish`。
-
-## 项目结构
-
-```
-arena-hero-mcp/
-├── server.mjs            # MCP server(官方 SDK)+ 手写 WS
-├── tampermonkey.user.js  # 浏览器油猴 WS 客户端
-├── tests/e2e.mjs         # 端到端测试(模拟浏览器)
-├── package.json          # bin + 依赖
-├── .npmignore            # 发布排除依赖/lock/.mcp.json
-├── .mcp.json             # 本项目自用 MCP 注册(node 直跑)
-└── README.md             # 本文档
-```
-
-## 环境变量
-
-| 变量 | 默认 | 说明 |
-|---|---|---|
-| `PORT` | `7790` | WS 监听端口(改了油猴 `WS_URL` 也要同步改) |
-
-## 注意与边界
-
-- **数据天花板**:只含你这局探索过的格子。没去过的地方没有。
-- **RESOURCE 会过时**:记忆点可能已被采/补充/移位,不可当当前可采;当前可采以游戏 WS `state.objects` 为准。
-- **DB 名固定**:`arena-hero-exploration-<namespace>`,`cells` 对象库。
-- **关 arena 页 = 断连**:AI 调工具返回"浏览器未连接"。重开页面即恢复。
+`PORT` 默认是 `7790`；修改后需要同步修改用户脚本中的 `WS_URL`。
