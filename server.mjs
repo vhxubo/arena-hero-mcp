@@ -4,8 +4,50 @@
 // MCP 层用官方 @modelcontextprotocol/sdk; WS 层手写(零额外依赖, RFC6455 子集).
 import net from 'node:net'
 import crypto from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+
+const here = dirname(fileURLToPath(import.meta.url))
+// 本地开发时 server.mjs 在包根; npx/全局装时在 node_modules/<pkg>/dist? 不——仍是 server.mjs 同级. 油猴脚本在其旁.
+const pkgRoot = existsSync(join(here, 'tampermonkey.user.js')) ? here : join(here, '..')
+
+// --- install 子命令: 写入各 agent 的 MCP 配置, 跑完即退, 不启动 MCP server ---
+// 用法: arena-hero-mcp install [agent] [--global]
+//   默认项目级(写当前目录配置); --global 写用户级配置.
+//   支持: claude | cursor | windsurf | cline | continue | claude-desktop
+//   注: claude-desktop 只有全局配置(桌面端不读项目级), --global 才有效.
+if (process.argv[2] === 'install') {
+  const isGlobal = process.argv.includes('--global')
+  const targetIdx = process.argv.findIndex((a, i) => i >= 3 && a !== '--global')
+  const target = process.argv[targetIdx] || 'claude'
+  const home = process.env.HOME || process.env.USERPROFILE || ''
+  const cwd = process.cwd()
+  const cmd = 'npx'
+  const args = ['-y', 'arena-hero-mcp']
+  // ponytail: 各 agent 两级配置路径. 项目级跟随 agent 自身约定(claude/.mcp.json, 其它在 <agent子目录>/文件).
+  const paths = {
+    'claude': { project: join(cwd, '.mcp.json'), global: join(home, '.claude.json') },
+    'claude-desktop': { project: null, global: join(home, '.config', 'Claude', 'claude_desktop_config.json') },
+    'cursor': { project: join(cwd, '.cursor', 'mcp.json'), global: join(home, '.cursor', 'mcp.json') },
+    'windsurf': { project: join(cwd, '.codeium', 'windsurf', 'mcp_config.json'), global: join(home, '.codeium', 'windsurf', 'mcp_config.json') },
+    'cline': { project: join(cwd, '.cline', 'mcp_settings.json'), global: join(home, '.cline', 'mcp_settings.json') },
+    'continue': { project: join(cwd, '.continue', 'config.json'), global: join(home, '.continue', 'config.json') },
+  }
+  if (!paths[target]) { console.error(`未知 agent: ${target}\n支持: ${Object.keys(paths).join(', ')}`); process.exit(1) }
+  const path = isGlobal ? paths[target].global : paths[target].project
+  if (!path) { console.error(`${target} 无项目级配置(桌面端不读项目级), 请加 --global: arena-hero-mcp install ${target} --global`); process.exit(1) }
+  let cfg = {}
+  if (existsSync(path)) { try { cfg = JSON.parse(readFileSync(path, 'utf8')) } catch { cfg = {} } }
+  cfg.mcpServers = cfg.mcpServers || {}
+  cfg.mcpServers['arena-hero-cells'] = { command: cmd, args }
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, JSON.stringify(cfg, null, 2))
+  console.log(`✓ 已写入 ${target} ${isGlobal ? '全局' : '项目级'} MCP 配置:\n  ${path}\n  arena-hero-cells: ${cmd} ${args.join(' ')}\n重启 ${target} 生效。`)
+  process.exit(0)
+}
 
 const WS_PORT = Number(process.env.PORT) || 7790
 const REFRESH_TIMEOUT_MS = 5000
@@ -165,6 +207,20 @@ server.registerTool('refresh', {
   const f = await freshCells()
   if (f.error) return { content: [{ type: 'text', text: `❌ ${f.error}` }] }
   return { content: [{ type: 'text', text: `已刷新: ${f.cells.length} cells\nkind 分布: ${JSON.stringify(tally(f.cells))}` }] }
+})
+
+server.registerTool('get_userscript', {
+  description: '返回 Tampermonkey 油猴脚本全文, 供用户粘贴进扩展安装. 顶部 NAMESPACE 需用户改成自己的 arena-hero 用户名. 不依赖浏览器连接, 随时可调.',
+  inputSchema: {},
+}, async () => {
+  const file = join(pkgRoot, 'tampermonkey.user.js')
+  try {
+    const code = readFileSync(file, 'utf8')
+    const note = '将以下全文粘进 Tampermonkey 新建脚本, 改顶部 NAMESPACE 为你的用户名, 保存即可. 原始文件见仓库 tampermonkey.user.js.\n\n'
+    return { content: [{ type: 'text', text: note + code }] }
+  } catch (e) {
+    return { content: [{ type: 'text', text: `❌ 读取油猴脚本失败: ${e.message}\n请从 https://github.com/vhxubo/arena-hero-mcp 获取 tampermonkey.user.js` }] }
+  }
 })
 
 // ponytail: stdio transport 由 MCP 客户端(Claude Code)驱动; 它接 stdin, server 即活着, ws 也同时听.

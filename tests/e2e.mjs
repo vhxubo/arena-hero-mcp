@@ -61,6 +61,8 @@ await new Promise(r => setTimeout(r, 200))
 send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
 await new Promise(r => setTimeout(r, 300))
 send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'list_resources', arguments: {} } })
+await new Promise(r => setTimeout(r, 500))
+send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'get_userscript', arguments: {} } })
 await new Promise(r => setTimeout(r, 2000))
 
 const tl = mcpResp.find(r => r.id === 2)
@@ -68,6 +70,10 @@ const lr = mcpResp.find(r => r.id === 3)
 console.log('✓ tools/list 工具数:', tl?.result?.tools?.length)
 const txt = lr?.result?.content?.[0]?.text || ''
 const ok = txt.includes('RESOURCE') && txt.includes('"position"')
+const us = mcpResp.find(r => r.id === 4)?.result?.content?.[0]?.text || ''
+const okUs = us.includes('Tampermonkey') && us.includes('NAMESPACE')
+console.log(okUs ? '✓ get_userscript 返回油猴脚本' : '✗ get_userscript 失败')
+if (!okUs) { console.log(us.slice(0,200)); process.exit(1) }
 console.log(ok ? '✓ list_resources 返回资源坐标' : '✗ list_resources 失败:\n' + txt)
 if (!ok) { console.log(txt); process.exit(1) }
 

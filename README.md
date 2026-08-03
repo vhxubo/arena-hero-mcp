@@ -25,9 +25,33 @@
 
 **生命周期**:server 由 MCP 客户端(Claude Code)启动时拉起,**开启期间一直常驻**(不是每次调用才启),客户端退出才停。油猴是独立浏览器进程,晚于 server 启动,靠自动重连(每 3 秒)连上。AI 在油猴连上之前调工具会收到"浏览器未连接"提示,连上后下次调用即可。
 
-## 安装(给别人用)
+## 安装
 
-### 方式 A:用 npx(推荐,不装包)
+### 一行装到你的 AI agent(推荐)
+
+```bash
+npx -y arena-hero-mcp install <agent>          # 项目级(默认), 写当前目录配置
+npx -y arena-hero-mcp install <agent> --global # 全局, 写用户级配置(所有项目可用)
+```
+
+**默认项目级**:只对当前目录的项目生效。加 `--global` 装到用户级,所有项目都能用。
+
+支持的 `<agent>` 及两级配置路径:
+
+| agent | 项目级(默认) | 全级(`--global`) |
+|---|---|---|
+| `claude` | `./.mcp.json` | `~/.claude.json` |
+| `claude-desktop` | *(不支持, 桌面端不读项目级)* | `~/.config/Claude/claude_desktop_config.json` |
+| `cursor` | `./.cursor/mcp.json` | `~/.cursor/mcp.json` |
+| `windsurf` | `./.codeium/windsurf/mcp_config.json` | `~/.codeium/windsurf/mcp_config.json` |
+| `cline` | `./.cline/mcp_settings.json` | `~/.cline/mcp_settings.json` |
+| `continue` | `./.continue/config.json` | `~/.continue/config.json` |
+
+写入的配置是 `npx -y arena-hero-mcp`(首次调用 npx 自动拉取,无需 `npm install`)。重启对应 agent 生效。
+
+> `claude-desktop` 只支持 `--global`。项目级会提示加 `--global`。
+
+### 手动配置(不想用 install 命令)
 
 把以下 `.mcp.json` 放进你的项目根或用户级 MCP 配置:
 
@@ -42,24 +66,13 @@
 }
 ```
 
-首次调用时 npx 自动拉取,无需 `npm install`。
-
-### 方式 B:全局装
-
-```bash
-npm install -g arena-hero-mcp
-```
-
-`.mcp.json` 用:
-```json
-{ "mcpServers": { "arena-hero-cells": { "command": "arena-hero-mcp" } } }
-```
-
 > 默认 **ws 无证书**(零配置,仅浏览器放行不安全内容)。
 
 ## 一次性配置(浏览器侧)
 
 ### 1. 装 Tampermonkey 脚本
+
+> 装好后,在 agent 里直接让 AI 调 `get_userscript` 工具即可拿到油猴脚本全文,粘贴进扩展安装,无需手动找文件。下面是手动获取方式:
 
 1. 装 Tampermonkey(或 Violentmonkey)扩展
 2. 仪表盘 → 新建脚本
@@ -95,8 +108,9 @@ npm install -g arena-hero-mcp
 | `get_all_cells` | 无 | 所有非 EMPTY 格(RESOURCE+OBSTACLE) |
 | `snapshot_info` | 无 | `count` / `namespace` / `updatedAt` / `kinds` 分布 / `browserConnected` |
 | `refresh` | 无 | 强制让浏览器重读一次 DB;返回数量与 kind 分布 |
+| `get_userscript` | 无 | 返回 Tampermonkey 油猴脚本全文(不依赖浏览器连接,随时可调) |
 
-> `list_*`/`get_all_cells` 每次自动 refresh,返回即调用那一刻最新。`refresh` 仅怀疑过旧时单独调。
+> `list_*`/`get_all_cells` 每次自动 refresh,返回即调用那一刻最新。`refresh` 仅怀疑过旧时单独调。`get_userscript` 让 AI 直接把脚本贴给你装,无需手动找文件。
 
 ## 验证(装完第一次)
 
