@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/arena-hero-mcp.svg)](https://www.npmjs.com/package/arena-hero-mcp)
 [![license](https://img.shields.io/npm/l/arena-hero-mcp.svg)](https://github.com/vhxubo/arena-hero-mcp/blob/main/LICENSE)
 
-让 AI 读取 Arena Hero 浏览器中的探索地图、移动目标、指令上下文，并预览路线。无需修改 Web 代码；浏览器数据由 Tampermonkey 脚本转发给本地 MCP server。
+让 AI 读取 Arena Hero 浏览器中的探索地图、移动目标、指令上下文，并预览路线。MCP 常驻于宿主的 stdio 生命周期，浏览器 bridge 只在调用相关工具时启动，空闲 2 分钟后退出。
 
 ## 安装
 
@@ -37,7 +37,14 @@ npx -y arena-hero-mcp install <agent> --global # 全局
 脚本自动识别当前用户名，无需修改配置。
 
 - 用户脚本地址：<https://raw.githubusercontent.com/vhxubo/arena-hero-mcp/main/tampermonkey.user.js>
-- 本地桥地址：`ws://127.0.0.1:7790`
+- 本地桥地址：`ws://127.0.0.1:7790`（按需监听）
+
+## 按需启动
+
+- `tools/list`、`get_userscript`、`snapshot_info` 不启动浏览器 bridge。
+- 其它工具首次调用时自动启动 bridge；油猴脚本会在下一次重连时接入。
+- bridge 空闲 2 分钟自动退出并释放端口，MCP 配置无需增加第二个进程。
+- `arena-hero-bridge` 仅供本地调试，普通用户无需手动启动。
 
 ## 工具
 
@@ -59,6 +66,7 @@ npx -y arena-hero-mcp install <agent> --global # 全局
 
 ```json
 {
+  "bridgeRunning": true,
   "browserConnected": true,
   "versionMatch": true
 }
@@ -74,7 +82,8 @@ npx -y arena-hero-mcp install <agent> --global # 全局
 
 ## 排错
 
-- `browserConnected: false`：确认 MCP server 已启动、Arena 页面已打开，并允许了不安全内容。
+- `bridgeRunning: false`：尚未调用浏览器工具，属于正常按需状态。
+- `browserConnected: false`：调用浏览器工具后，确认 Arena 页面已打开，并允许了不安全内容。
 - “无探索数据”：先进入 Arena 探索地图。
 - 脚本版本不匹配：重新调用 `get_userscript` 并覆盖旧用户脚本。
 - `EADDRINUSE`：端口 7790 已被另一实例占用。

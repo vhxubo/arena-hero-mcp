@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 本地端到端测试: 起本项目的 server, 模拟一个浏览器 ws 客户端连入,
+// 本地端到端测试: 起 MCP, 验证 bridge 按需启动, 再模拟浏览器 ws 客户端,
 // 收 refresh 指令时回推假快照, 再发 MCP initialize/tools-list/tools-call 验证全链路.
 // 用法: node tests/e2e.mjs
 import net from 'node:net'
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
-const srv = spawn('node', ['server.mjs'], { cwd: root, env: { ...process.env }, stdio: ['pipe', 'pipe', 'inherit'] })
+const srv = spawn('node', ['mcp.mjs'], { cwd: root, env: { ...process.env, BRIDGE_IDLE_MS: '1000' }, stdio: ['pipe', 'pipe', 'inherit'] })
 
 let mcpBuf = '', mcpResp = []
 srv.stdout.on('data', d => {
@@ -22,6 +22,15 @@ srv.stdout.on('data', d => {
   }
 })
 const send = m => srv.stdin.write(JSON.stringify(m) + '\n')
+async function waitFor(id, timeout = 5000) {
+  const end = Date.now() + timeout
+  while (Date.now() < end) {
+    const response = mcpResp.find((item) => item.id === id)
+    if (response) return response
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  throw new Error(`等待 MCP 响应 ${id} 超时`)
+}
 
 function wsConnect() {
   const opts = { port: Number(process.env.PORT) || 7790, host: '127.0.0.1' }
@@ -67,18 +76,19 @@ function wsConnect() {
   return sock
 }
 
-await new Promise(r => setTimeout(r, 1000))
-const sock = wsConnect()
-
 send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } } })
 await new Promise(r => setTimeout(r, 300))
 send({ jsonrpc: '2.0', method: 'notifications/initialized' })
 await new Promise(r => setTimeout(r, 200))
 send({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })
 await new Promise(r => setTimeout(r, 300))
+send({ jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'snapshot_info', arguments: {} } })
+send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'get_userscript', arguments: {} } })
+await new Promise(r => setTimeout(r, 300))
 send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'list_resources', arguments: {} } })
 await new Promise(r => setTimeout(r, 500))
-send({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'get_userscript', arguments: {} } })
+const sock = wsConnect()
+await new Promise(r => setTimeout(r, 500))
 send({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'get_exploration_map', arguments: { kind: 'EMPTY', minX: 0, maxX: 0 } } })
 send({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'get_movement_goals', arguments: {} } })
 await new Promise(r => setTimeout(r, 200))
@@ -87,11 +97,17 @@ await new Promise(r => setTimeout(r, 200))
 send({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'get_web_game_context', arguments: {} } })
 await new Promise(r => setTimeout(r, 200))
 send({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'preview_route', arguments: { objectId: 'worker', destination: [1, 0] } } })
-await new Promise(r => setTimeout(r, 2000))
+await Promise.all([3, 5, 6, 7, 8, 9].map((id) => waitFor(id, 10_000)))
+await new Promise(r => setTimeout(r, 1200))
+send({ jsonrpc: '2.0', id: 11, method: 'tools/call', params: { name: 'snapshot_info', arguments: {} } })
+await waitFor(11)
 
 const tl = mcpResp.find(r => r.id === 2)
 const lr = mcpResp.find(r => r.id === 3)
 console.log('✓ tools/list 工具数:', tl?.result?.tools?.length)
+const initial = mcpResp.find(r => r.id === 10)?.result?.content?.[0]?.text || ''
+if (!initial.includes('"bridgeRunning": false')) { console.log('✗ bridge 未保持按需关闭:', initial); process.exit(1) }
+console.log('✓ 非浏览器工具不启动 bridge')
 const txt = lr?.result?.content?.[0]?.text || ''
 const ok = txt.includes('RESOURCE') && txt.includes('"position"')
 const us = mcpResp.find(r => r.id === 4)?.result?.content?.[0]?.text || ''
@@ -109,6 +125,9 @@ for (const [id, expected] of [[6, 'worker'], [7, 'effective'], [8, 'open'], [9, 
   if (!value.includes(expected)) { console.log(`✗ 浏览器工具 ${id} 失败:`, value); process.exit(1) }
 }
 console.log('✓ 四个 Web 上下文工具返回结果')
+const idle = mcpResp.find(r => r.id === 11)?.result?.content?.[0]?.text || ''
+if (!idle.includes('"bridgeRunning": false')) { console.log('✗ 空闲 bridge 未退出:', idle); process.exit(1) }
+console.log('✓ 空闲 bridge 自动退出')
 
 console.log('\n全部通过 ✓')
 srv.kill(); sock.destroy(); process.exit(0)

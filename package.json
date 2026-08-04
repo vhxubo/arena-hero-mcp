@@ -1,6 +1,6 @@
 {
   "name": "arena-hero-mcp",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "type": "module",
   "description": "MCP bridge: query arena-hero browser IndexedDB exploration cells via WebSocket",
   "license": "MIT",
@@ -17,18 +17,21 @@
     "claude",
     "indexeddb"
   ],
-  "main": "server.mjs",
+  "main": "mcp.mjs",
   "bin": {
-    "arena-hero-mcp": "server.mjs"
+    "arena-hero-mcp": "mcp.mjs",
+    "arena-hero-bridge": "bridge.mjs"
   },
   "files": [
+    "mcp.mjs",
+    "bridge.mjs",
     "server.mjs",
     "tampermonkey.user.js",
     "README.md",
     "tests/e2e.mjs"
   ],
   "scripts": {
-    "start": "node server.mjs",
+    "start": "node mcp.mjs",
     "test": "node tests/e2e.mjs"
   },
   "dependencies": {
