@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         arena-hero-mcp
 // @namespace    arena-hero-mcp
-// @version      0.5.0
+// @version      0.5.1
 // @description  向本地 MCP 桥提供浏览器地图、指令上下文和路线预览
 // @match        https://app.arenahero.io/*
 // @match        http://localhost/*
@@ -14,7 +14,7 @@
 (function () {
   'use strict'
   // ponytail: 脚本版本, 必须与 npm 包(arena-hero-mcp)version 一致, 否则 server 报版本不匹配.
-  const SCRIPT_VERSION = '0.5.0'
+  const SCRIPT_VERSION = '0.5.1'
   // 自动识别失败时使用; 本地 demo 仍固定用 demo.
   const FALLBACK_NAMESPACE = 'anonymous'
   // ws 无加密. 浏览器需对 app.arenahero.io 放行"不安全内容"才能从 https 页连本 ws://

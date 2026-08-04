@@ -4,10 +4,12 @@
 // 用法: node tests/e2e.mjs
 import net from 'node:net'
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
 const srv = spawn('node', ['server.mjs'], { cwd: root, env: { ...process.env }, stdio: ['pipe', 'pipe', 'inherit'] })
 
 let mcpBuf = '', mcpResp = []
@@ -49,7 +51,7 @@ function wsConnect() {
       preview_route: { path: [[0, 0], [1, 0]], next_direction: 'RIGHT' },
     }[command.tool]
     const message = command.cmd === 'refresh'
-      ? { type: 'snapshot', v: '0.5.0', namespace: 'test', cells: [
+      ? { type: 'snapshot', v: version, namespace: 'test', cells: [
           { kind: 'EMPTY', position: [0, 0] }, { kind: 'RESOURCE', position: [1, 2] }, { kind: 'OBSTACLE', position: [3, 4] },
         ] }
       : { type: 'tool_response', requestId: command.requestId, result }
