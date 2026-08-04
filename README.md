@@ -30,11 +30,14 @@ npx -y arena-hero-mcp install <agent> --global # 全局
 ## 浏览器配置
 
 1. 安装 Tampermonkey 或 Violentmonkey。
-2. 调用 MCP 工具 `get_userscript`，将返回的脚本全文粘贴为新用户脚本并保存。
+2. 点击 **[快速安装油猴脚本](https://raw.githubusercontent.com/vhxubo/arena-hero-mcp/main/tampermonkey.user.js)**。也可调用 MCP 工具 `get_userscript` 手动安装。
 3. 在 `https://app.arenahero.io` 的站点设置中允许“不安全内容”，使 HTTPS 页面可以连接本机 `ws://127.0.0.1:7790`。
 4. 登录并打开 `https://app.arenahero.io/arena`。右上角显示 `📡 已连 MCP 桥` 即可使用。
 
 脚本自动识别当前用户名，无需修改配置。
+
+- 用户脚本地址：<https://raw.githubusercontent.com/vhxubo/arena-hero-mcp/main/tampermonkey.user.js>
+- 本地桥地址：`ws://127.0.0.1:7790`
 
 ## 工具
 
